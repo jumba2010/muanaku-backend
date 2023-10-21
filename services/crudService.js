@@ -14,10 +14,6 @@ const { v4: uuidv4 } = require('uuid');
 const {composeUdateFields,flattenAttributes}=require('../utils/DynamoDBUpdaterUtil');
 const {getCurrentDateTime}=require('../utils/DatetimeUtils');
 
-const marshallOptions = {
-  removeUndefined: true, // Removes undefined attributes
-  convertClassInstance: true, // Converts class instances to plain objects
-};
 
 const create = async (tableName,payload) => {
   
@@ -42,28 +38,167 @@ const create = async (tableName,payload) => {
   }
 };
 
-const queryBySucursalId = async (tableName,sucursalId) => {
-  try {
-    const command = new QueryCommand({
-      IndexName: 'sucursalId-index', 
-      KeyConditionExpression: "sucursalId = :sucursalId",
-      ExpressionAttributeValues: {
-        ":sucursalId": { S: sucursalId }
-      },
-      TableName: tableName,
-    });
+const update = async (tableName,id, payload) => {
+  payload.updatedAt = getCurrentDateTime();
+  let fieldsToUpdate=composeUdateFields(payload);
   
-    const response = await dynamoDBClient.send(command);
-    return flattenAttributes(response.Items)
-  } catch (error) {
-    console.log(error);
-    throw error;
+    try {
+      const input = {
+        ExpressionAttributeNames:fieldsToUpdate.expressionAttributeNames,
+        ExpressionAttributeValues: fieldsToUpdate.expressionAttributeValues,
+        Key: {
+          "id": {
+            S: id
+          }
+        },
+        ReturnValues: "ALL_NEW",
+        TableName: tableName,
+        UpdateExpression:fieldsToUpdate.updateExpression,
+      };
+  
+      const command = new UpdateItemCommand(input);
+      await dynamoDBClient.send(command);
+  
+      return payload;
+    } catch (error) {
+      console.log(error);
+      throw error;
+    }
+  };
+  
+  
+  const deleteRow = async (tableName,id) => {
+    try {
+      const params = {
+        TableName:tableName,
+        Key: marshall({ id: id }),
+      };
+  
+      const command = new DeleteItemCommand(params);
+      await dynamoDBClient.send(command);
+    } catch (error) {
+      console.log(error);
+      throw error;
+    }
+  };
+  
+  const inactivate = async (tableName,id) => {
+    try {
+      const params = {
+        TableName:tableName,
+        Key: {
+          id,
+        },
+        UpdateExpression: 'SET #active = :active',
+        ExpressionAttributeNames: {
+          '#active': 'active',
+        },
+        ExpressionAttributeValues: {
+          ':active': false, 
+        },
+      };
+  
+      const command = new UpdateItemCommand(params);
+      await dynamoDBClient.send(command);
+    } catch (error) {
+      console.log(error);
+      throw error;
+    }
+  };
+
+
+  const readById = async (tableName,id) => {
+
+    try {
+      const params = {
+        TableName: tableName,
+        Key: marshall({ id: id }),
+      };
+  
+      const command = new GetItemCommand(params);
+      const response = await dynamoDBClient.send(command);
+  
+      if (!response.Item) {
+        throw new Error('not_found',`${tableName} was not found by id ${id}`);
+      }
+  
+      return flattenAttributes(response.Item);
+    } catch (error) {
+      console.log(error);
+      throw error;
+    }
+  };
+  
+  
+  const findActiveByUserName = async (tableName,username) => {
+    try {
+      const command = new QueryCommand({
+        IndexName: 'sge-username-index', 
+        KeyConditionExpression: "username = :username",
+        FilterExpression: "#active = :active",
+        ExpressionAttributeNames: {
+          '#active': 'active',
+        },
+        ExpressionAttributeValues: {
+          ":username": { S: username },
+          ":active": { N: "1" }
+        },
+        TableName: tableName,
+      });
+      
+      const response = await dynamoDBClient.send(command);
+      return flattenAttributes(response.Items[0]);
+  
+    } catch (error) {
+      console.log(error);
+      throw error;
+    }
+  };
+
+
+const queryBySucursalId= async (tableName, sucursalId, lastEvaluatedKey, pageLimit) => {
+  const data = []
+
+  let done = false;
+
+  while (!done) {
+    try {
+      const command = new QueryCommand({
+        IndexName: 'sucursalId-index',
+        KeyConditionExpression: "sucursalId = :sucursalId",
+        ExpressionAttributeValues: {
+          ":sucursalId": { S: sucursalId }
+        },
+        TableName: tableName,
+        ExclusiveStartKey: lastEvaluatedKey,
+        Limit: pageLimit,
+        ScanIndexForward: false, // Set to false for descending order
+      });
+
+      const response = await dynamoDBClient.send(command);
+
+      if (response.Items) {
+        data.push(...flattenAttributes(response.Items));
+      }
+
+      lastEvaluatedKey = response.LastEvaluatedKey;
+
+      if (!lastEvaluatedKey) {
+        done = true; // No more pages
+      }
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
   }
+
+  return { data, lastEvaluatedKey };
 };
 
-const queryBySucursalIdAnYear = async (tableName,sucursalId,year) => {
 
-  if(!tableName || !sucursalId || !year){
+const findPaymentsBySucursalAndYearAndMonth = async (tableName,sucursalId,year,month) => {
+
+  if(!tableName || !sucursalId || !year || !month){
     return []
   }
 
@@ -73,13 +208,16 @@ const queryBySucursalIdAnYear = async (tableName,sucursalId,year) => {
       KeyConditionExpression: "sucursalId = :sucursalId",
       ExpressionAttributeNames: {
         '#year': 'year',
+        '#month': 'month',
       },
-      FilterExpression: "#year = :year",
+      FilterExpression: "#year = :year and #month = :month",
       ExpressionAttributeValues: {
         ":sucursalId": { S: sucursalId },
-        ":year": { N: year.toString() }
+        ":year": { N: year.toString() },
+        ":month": { N: month.toString() }
       },
       TableName: tableName,
+      ScanIndexForward: false
     });
 
     const response = await dynamoDBClient.send(command);
@@ -110,6 +248,7 @@ const queryBySucursalIdAndStatusAndYear = async (tableName,sucursalId,status,yea
         ":status": { N: status.toString()}
       },
       TableName: tableName,
+      ScanIndexForward: false
     });
   
     const response = await dynamoDBClient.send(command);
@@ -121,189 +260,8 @@ const queryBySucursalIdAndStatusAndYear = async (tableName,sucursalId,status,yea
 };
 
 
-const queryUnpaidBySucursalId= async (tableName,sucursalId) => {
-  if(!tableName || !sucursalId ){
-    return []
-  }
-  
-  console.log(tableName,sucursalId)
-
-  
-  try {
-    const command = new QueryCommand({
-      IndexName: 'sucursalId-index',
-      KeyConditionExpression: "sucursalId = :sucursalId",
-      FilterExpression: "#status = :status",
-      ExpressionAttributeNames: {
-        '#status': 'status',
-      },
-      ExpressionAttributeValues: {
-        ":sucursalId": { S: sucursalId },
-        ":status": { N: "0"}
-      },
-      TableName: tableName,
-    });
-  
-    const response = await dynamoDBClient.send(command);
-    return flattenAttributes(response.Items)
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-};
-
-
-const readById = async (tableName,id) => {
-
-  try {
-    const params = {
-      TableName: tableName,
-      Key: marshall({ id: id }),
-    };
-
-    const command = new GetItemCommand(params);
-    const response = await dynamoDBClient.send(command);
-
-    if (!response.Item) {
-      throw new Error('not_found',`${tableName} was not found by id ${id}`);
-    }
-
-    return flattenAttributes(response.Item);
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-};
-
-const update = async (tableName,id, payload) => {
-payload.updatedAt = getCurrentDateTime();
-let fieldsToUpdate=composeUdateFields(payload);
-
-  try {
-    const input = {
-      ExpressionAttributeNames:fieldsToUpdate.expressionAttributeNames,
-      ExpressionAttributeValues: fieldsToUpdate.expressionAttributeValues,
-      Key: {
-        "id": {
-          S: id
-        }
-      },
-      ReturnValues: "ALL_NEW",
-      TableName: tableName,
-      UpdateExpression:fieldsToUpdate.updateExpression,
-    };
-
-    const command = new UpdateItemCommand(input);
-    await dynamoDBClient.send(command);
-
-    return payload;
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-};
-
-
-const deleteRow = async (tableName,id) => {
-  try {
-    const params = {
-      TableName:tableName,
-      Key: marshall({ id: id }),
-    };
-
-    const command = new DeleteItemCommand(params);
-    await dynamoDBClient.send(command);
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-};
-
-const inactivate = async (tableName,id) => {
-  try {
-    const params = {
-      TableName:tableName,
-      Key: {
-        id,
-      },
-      UpdateExpression: 'SET #active = :active',
-      ExpressionAttributeNames: {
-        '#active': 'active',
-      },
-      ExpressionAttributeValues: {
-        ':active': false, 
-      },
-    };
-
-    const command = new UpdateItemCommand(params);
-    await dynamoDBClient.send(command);
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-};
-
-const findActiveByUserName = async (tableName,username) => {
-  try {
-    const command = new QueryCommand({
-      IndexName: 'sge-username-index', 
-      KeyConditionExpression: "username = :username",
-      FilterExpression: "#active = :active",
-      ExpressionAttributeNames: {
-        '#active': 'active',
-      },
-      ExpressionAttributeValues: {
-        ":username": { S: username },
-        ":active": { N: "1" }
-      },
-      TableName: tableName,
-    });
-    
-    const response = await dynamoDBClient.send(command);
-    return flattenAttributes(response.Items[0]);
-
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-
-
-
-};
-
-
-const findPaymentsByRegistrationId = async (registrationId,sucursalId) => {
-  if(!sucursalId ||  !registrationId){
-    return []
-  }
-  
-  try {
-    const command = new QueryCommand({
-      IndexName: 'sucursalId-index',
-      KeyConditionExpression: "sucursalId = :sucursalId",
-      FilterExpression: "#registrationId = :registrationId",
-      ExpressionAttributeNames: {
-        '#registrationId': 'registrationId',
-      },
-      ExpressionAttributeValues: {
-        ":sucursalId": { S: sucursalId },
-        ":registrationId": { S: registrationId }
-        
-      },
-      TableName: constants.PAYMENT_TABLE,
-    });
-  
-    const response = await dynamoDBClient.send(command);
-    return flattenAttributes(response.Items)
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-};
-
-
-const findCurrentByStudentId = async (tableName,studentId, sucursalId) => {
-  if(!tableName || !sucursalId || !studentId ){
+const findBySucursalAndBatchId = async (tableName,sucursalId,batchId) => {
+  if(!tableName || !sucursalId || !batchId ){
     return []
   }
   
@@ -311,15 +269,16 @@ const findCurrentByStudentId = async (tableName,studentId, sucursalId) => {
     const command = new QueryCommand({
       IndexName: 'sucursalId-index',
       KeyConditionExpression: ",sucursalId = :sucursalId",
-      FilterExpression: "//#region studentId = :studentId",
+      FilterExpression: "#batchId = :batchId",
       ExpressionAttributeNames: {
-        '#studentId': 'studentId',
+        '#batchId': 'batchId',
       },
       ExpressionAttributeValues: {
         ":sucursalId": { S: sucursalId },
-        ":studentId": { S: studentId }
+        ":batchId": { S: batchId }
       },
       TableName: tableName,
+      ScanIndexForward: false
     });
   
     const response = await dynamoDBClient.send(command);
@@ -330,36 +289,6 @@ const findCurrentByStudentId = async (tableName,studentId, sucursalId) => {
   }
 };
 
-
-const findCurrentByStudentIdAndYear = async (tableName,studentId,year,sucursalId) => {
-  
-  if(!tableName || !sucursalId || !year || !studentId){
-    return []
-  }
-  try {
-    const command = new QueryCommand({
-      IndexName: 'sucursalId-index',
-      KeyConditionExpression: "sucursalId = :sucursalId",
-      FilterExpression: "#studentId = :studentId AND #year = :year",
-      ExpressionAttributeNames: {
-        '#year': 'year',
-        '#studentId': 'studentId',
-      },
-      ExpressionAttributeValues: {
-        ":sucursalId": { S: sucursalId },
-        ":studentId": { S: studentId },
-        ":year": { N: year.toString() }
-      },
-      TableName: tableName,
-    });
-  
-    const response = await dynamoDBClient.send(command);
-    return flattenAttributes(response.Items)
-  } catch (error) {
-    console.log(error);
-    throw error;
-  }
-};
 
 const removeEmpty = (obj) => {
   let newObj = {};
@@ -377,11 +306,8 @@ module.exports = {
   inactivate,
   readById,
   queryBySucursalId,
-  queryBySucursalIdAnYear,
+  findPaymentsBySucursalAndYearAndMonth,
   findActiveByUserName,
   queryBySucursalIdAndStatusAndYear,
-  findPaymentsByRegistrationId,
-  findCurrentByStudentId,
-  findCurrentByStudentIdAndYear,
-  queryUnpaidBySucursalId
+  findBySucursalAndBatchId,
  };

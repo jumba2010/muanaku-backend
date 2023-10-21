@@ -25,10 +25,11 @@ router.put('/:id', async (req,res)=>{
   } 
 });
 
-router.get('/:sucursalId', async (req,res)=>{
-const response=await crudService.queryBySucursalId(constants.PROFILE_TABLE,req.params.sucursalId)   
-res.status(200).send(response)
-});
+router.get('sucursal/:sucursalId', async (req,res)=>{
+  const response=await crudService.queryBySucursalId(constants.PROFILE_TABLE,req.params.sucursalId,req.query.lastEvaluatedKey,req.query.pageLimit)   
+  res.status(200).send(response)
+  });
+  
 
 
 module.exports=router;
