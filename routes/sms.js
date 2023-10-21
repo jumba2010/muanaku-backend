@@ -3,7 +3,7 @@ const router=express.Router();
 const crudService=require('../services/crudService');
 const constants=require('../utils/constants');
  
-router.pos('/', async (req,res)=>{
+router.post('/', async (req,res)=>{
   try{
     await crudService.update(constants.SMS_TABLE,req.body)
     res.status(200).send({message:"Update made successfully"})

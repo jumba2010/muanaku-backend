@@ -11,6 +11,7 @@ const incidentSchema = require('../models/incident');
 const orderSchema = require('../models/order');
 const priceConfigSchema = require('../models/priceconfig');
 const vaccineSchema = require('../models/vaccine');
+const profileSchema = require('../models/profile');
 
 const anomaliesTableUtility = new DynamoDBTableUtility(anomaliesSchema.TableName, anomaliesSchema);
 const chickenBatchTableUtility = new DynamoDBTableUtility( chickenBatchSchema.TableName, chickenBatchSchema);
@@ -24,6 +25,7 @@ const incidentTableUtility = new DynamoDBTableUtility(incidentSchema.TableName, 
 const orderTableUtility = new DynamoDBTableUtility(orderSchema.TableName, orderSchema);
 const priceConfigTableUtility = new DynamoDBTableUtility(priceConfigSchema.TableName, priceConfigSchema);
 const vaccineTableUtility = new DynamoDBTableUtility(vaccineSchema.TableName, vaccineSchema);
+const profileTableUtility = new DynamoDBTableUtility(profileSchema.TableName, profileSchema);
 
 const update=async () => {
   await anomaliesTableUtility.checkOrCreateTable();
@@ -38,7 +40,7 @@ const update=async () => {
   await orderTableUtility.checkOrCreateTable();
   await priceConfigTableUtility.checkOrCreateTable();
   await vaccineTableUtility.checkOrCreateTable();
-  
+  await profileTableUtility.checkOrCreateTable();
 
 }
 
