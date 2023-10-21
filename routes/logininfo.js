@@ -19,6 +19,7 @@ router.get('/:userId', async (req,res)=>{
   res.send([{
     date:"2023-12-12 18:22:18"
   }])
+
 });
 
 module.exports=router;

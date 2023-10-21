@@ -6,7 +6,7 @@ const constants=require('../utils/constants');
  
 router.post('/', async (req,res)=>{
   try{
-    const resp= await crudService.create(constants.FREQUENCY_TABLE,req.body)
+    const resp= await crudService.create(constants.ANOMALIES_TABLE,req.body)
     res.send(resp)
    }
    catch(err){
@@ -17,7 +17,7 @@ router.post('/', async (req,res)=>{
 
 router.put('/:id', async (req,res)=>{
   try{
-    await crudService.update(constants.FREQUENCY_TABLE,req.params.id,req.body)
+    await crudService.update(constants.ANOMALIES_TABLE,req.params.id,req.body)
     res.status(200).send({message:"Updated Successfully!"})
   }
   catch(err){
@@ -26,10 +26,15 @@ router.put('/:id', async (req,res)=>{
   } 
 });
 
-router.get('/:sucursalId', async (req,res)=>{
-const response=await crudService.queryBySucursalId(constants.FREQUENCY_TABLE,req.params.sucursalId)   
+router.get('sucursal/:sucursalId', async (req,res)=>{
+const response=await crudService.queryBySucursalId(constants.ANOMALIES_TABLE,req.params.sucursalId,req.query.lastEvaluatedKey,req.query.pageLimit)   
 res.status(200).send(response)
 });
+
+router.get('sucursal/:sucursalId/:batchId', async (req,res)=>{
+  const response=await crudService.findBySucursalAndBatchId(constants.ANOMALIES_TABLE,req.params.sucursalId,req.params.batchId)   
+  res.status(200).send(response)
+  });
 
 
 module.exports=router;
